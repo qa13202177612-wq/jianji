@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">简记</string>
+    <string name="screen_service_label">简记屏幕识别</string>
+    <string name="screen_service_summary">识别支付成功页并自动记账</string>
+    <string name="screen_service_description">优先读取支付成功页面的文字；读不到文字时会截取当前屏幕做本地 OCR，解析金额与收款方并自动生成账单。截图仅在本机内存中处理，不上传、不保存，也不会代替你点击或输入。</string>
+</resources>

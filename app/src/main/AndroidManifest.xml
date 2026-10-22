@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 接收银行/支付短信。属于危险权限，需在运行时动态申请 -->
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+
+    <!-- Android 13+ 发送「已自动记账」通知需要运行时权限 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+        说明：CSV 导出使用系统文件选择器（SAF），因此不需要
+        READ_EXTERNAL_STORAGE / WRITE_EXTERNAL_STORAGE 权限。
+        安卓 10 及以上分区存储下这是最稳妥、无需权限的方案。
+    -->
+
+    <application
+        android:name=".JianJiApp"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.JianJi">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.JianJi">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+            SMS_RECEIVED 是系统受保护广播，声明 android:permission="android.permission.BROADCAST_SMS"
+            可防止第三方应用伪造短信广播。exported 必须为 true 才能接收系统广播。
+        -->
+        <receiver
+            android:name=".sms.SmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter android:priority="999">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+            屏幕识别：无障碍服务只读取当前窗口文本，不截图、不点击。
+            用户必须在系统「无障碍」设置中手动开启，系统会展示权限说明。
+        -->
+        <service
+            android:name=".screen.ScreenRecognitionService"
+            android:exported="true"
+            android:label="@string/screen_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/screen_recognition_service" />
+        </service>
+
+        <!-- 仅用于演示/验证屏幕识别的模拟支付成功页 -->
+        <activity
+            android:name=".screen.ScreenDemoActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:theme="@style/Theme.JianJi" />
+    </application>
+
+</manifest>

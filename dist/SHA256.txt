@@ -1,0 +1,10 @@
+JianJi-v1.1.1.apk
+SHA-256: 9FCE4D88F4AF1C0706BB83BC98E04C820111FFA1DF19379D9F9F9AB4EECF68D2
+Size: 47392994 bytes
+Package: com.jianji.app
+Version: 1.1.1 (3)
+minSdk: 29
+targetSdk: 34
+Signing certificate SHA-256: c725d994dae775e206d9c128eb8a18484b2a31b81cf78374896eccb233b3ab46
+
+Demo signing key only. Generate your own keystore before publishing.
