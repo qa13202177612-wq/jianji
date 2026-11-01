@@ -1,6 +1,36 @@
 # 简记（JianJi）
 
+<p align="center">
+  <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-2.0-orange.svg">
+  <img alt="Compose" src="https://img.shields.io/badge/Jetpack%20Compose-Material%203-blue.svg">
+  <img alt="minSdk" src="https://img.shields.io/badge/Android-10%2B-green.svg">
+  <img alt="Offline" src="https://img.shields.io/badge/100%25-本地离线-brightgreen.svg">
+  <img alt="Tests" src="https://img.shields.io/badge/单元测试-46%20用例-informational.svg">
+</p>
+
 一款对标「喵喵记账」的本地优先个人记账 App。使用 **Kotlin + Jetpack Compose + Material 3 + Room + DataStore** 开发，最低支持 **Android 10（API 29）**，适配到 **Android 14（API 34）**。
+
+支付短信 / 支付成功页**自动记账**、预算、图表统计全部离线完成——数据不出手机。
+
+## 📱 截图
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/01-home.png" alt="首页：预算卡+消费构成饼图+快速记账" /></td>
+    <td width="50%"><img src="docs/screenshots/02-stats.png" alt="统计：每日支出柱状图，点击查看当日明细" /></td>
+  </tr>
+  <tr>
+    <td align="center">首页 · 预算进度 / 消费构成 / 快速记账</td>
+    <td align="center">统计 · 每日柱状图（点击柱子气泡显示当日金额）</td>
+  </tr>
+</table>
+
+## ✨ v1.2 新特性
+
+- **四层防重复入账**：交易单号稳定去重键、历史订单时间闸、账单列表页识别、入库前 24 小时同金额查重——点开已支付订单不再重复记账，短信+截图双渠道互斥
+- **点柱子看明细**：统计页点任意一天，气泡显示精确金额，弹窗列出当日逐笔账单（商家/分类/来源/金额）
+- **商家消费排行**：本月支出 TOP10，前三名金银铜牌 + 比例条，识屏/短信/手动账单自动归类商家
+- 识别器单元测试 46 条全绿（含真实微信/支付宝页面布局回归）
 
 > 所有账单默认只保存在手机本地 Room 数据库；CSV 导出通过系统文件选择器完成，不上传任何数据。
 >
