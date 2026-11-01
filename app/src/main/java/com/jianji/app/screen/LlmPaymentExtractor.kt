@@ -35,6 +35,9 @@ object LlmPaymentExtractor {
         5. 订单列表/历史记录里的退款文案：isPayment=false，不要记收入。
         6. 失败/待支付页：isPayment=false，status=FAILED/PENDING。
         7. 无法确定：isPayment=false，status=UNKNOWN。
+        8. 页面像账单/订单列表（出现多个互不相同的金额，或多行「已支付/已完成/待收货」）：那是历史记录不是新交易，isPayment=false。
+        9. 支付时间/交易时间/创建时间的日期早于今天：历史订单详情页，isPayment=false。
+        10. amount 只能取与支付状态同一区域的实付/扣款金额；页面有多个不同金额且无法唯一确定时，isPayment=false，不要猜。
         只根据页面文字判断，不要编造。
     """.trimIndent()
 
@@ -149,6 +152,13 @@ object LlmPaymentExtractor {
 
             if (!obj.optBoolean("isPayment", false)) return null
 
+            // 与本地规则共用防线：历史订单时间一律不出账（LLM 偶发不守规矩时的硬闸）
+            val pageLines = safeText.split('\n')
+            if (ScreenPaymentParser.hasPastTransactionDate(pageLines)) {
+                Log.d(TAG, "LLM 命中历史订单时间，丢弃")
+                return null
+            }
+
             val deferred = obj.optBoolean("deferred", false)
             var status = parseStatus(obj.optString("status"))
             if (status == PaymentStatus.PENDING && deferred &&
@@ -197,7 +207,8 @@ object LlmPaymentExtractor {
                 rawText = safeText.take(300),
                 app = PaymentApp.fromPackage(packageName),
                 status = status,
-                deferred = deferred
+                deferred = deferred,
+                txnNo = ScreenPaymentParser.extractTxnNo(pageLines)
             )
         } catch (t: Throwable) {
             Log.w(TAG, "解析失败: ${t.javaClass.simpleName}")

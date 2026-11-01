@@ -35,4 +35,15 @@ interface BillDao {
 
     @Query("SELECT COUNT(*) FROM bills")
     suspend fun count(): Int
+
+    /**
+     * 时间窗内是否已有同金额、同方向的自动账单（屏幕识别/短信）。
+     * 用于防止用户点开已支付订单、账单列表时重复入账。
+     */
+    @Query(
+        "SELECT COUNT(*) FROM bills " +
+            "WHERE amountCents = :amountCents AND type = :type " +
+            "AND source IN ('SCREEN', 'SMS') AND createdAt > :sinceMillis"
+    )
+    suspend fun countRecentAutoBills(amountCents: Long, type: String, sinceMillis: Long): Int
 }

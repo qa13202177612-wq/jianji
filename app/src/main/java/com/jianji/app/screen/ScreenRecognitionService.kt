@@ -538,6 +538,22 @@ class ScreenRecognitionService : AccessibilityService() {
         val app = application as? JianJiApp ?: return
         scope.launch {
             try {
+                // 防线3：入库前查库里近 24 小时是否已有同金额、同方向的自动账单。
+                // 点开已支付订单/账单列表时页面文本和支付成功页不同，内存 key 与
+                // 3 分钟时间桶都挡不住；同一笔交易若已由银行短信入账，这里也拦下。
+                if (app.repository.hasRecentAutoBill(
+                        payment.amountCents,
+                        payment.type.name,
+                        System.currentTimeMillis() - AUTO_DEDUPE_WINDOW_MS
+                    )
+                ) {
+                    Log.d(
+                        TAG,
+                        "跳过重复账单(窗口内已记同金额) package=$packageName " +
+                            "amount=${payment.amountCents} type=${payment.type} txn=${payment.txnNo}"
+                    )
+                    return@launch
+                }
                 val bill = BillEntity(
                     type = payment.type.name,
                     amountCents = payment.amountCents,
@@ -686,6 +702,9 @@ class ScreenRecognitionService : AccessibilityService() {
 
         /** 本地规则失败后，AI 兜底的最小间隔。 */
         private const val LLM_COOLDOWN_MS = 15_000L
+
+        /** 入库前「同金额+同方向自动账单」查重窗口：点开旧订单不再重复入账。 */
+        private const val AUTO_DEDUPE_WINDOW_MS = 24 * 60 * 60 * 1000L
 
         /** 只有出现这些文案才值得调用 AI，避免商品页/聊天页误调用。 */
         private val LLM_PAGE_HINTS = listOf(

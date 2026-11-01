@@ -30,6 +30,13 @@ data class TrendPoint(
     val expenseCents: Long
 )
 
+/** 商家消费排行的一行:金额 + 笔数 */
+data class MerchantSpend(
+    val name: String,
+    val cents: Long,
+    val count: Int
+)
+
 data class MonthStats(
     val month: YearMonth = YearMonth.now(),
     val incomeCents: Long = 0L,
@@ -37,7 +44,11 @@ data class MonthStats(
     val expenseSlices: List<CategorySlice> = emptyList(),
     val incomeSlices: List<CategorySlice> = emptyList(),
     val trend: List<TrendPoint> = emptyList(),
-    val dailyExpenses: List<DailySpendPoint> = emptyList()
+    val dailyExpenses: List<DailySpendPoint> = emptyList(),
+    /** 选中月份的全部支出账单,供柱状图点击后的「当日明细」弹窗过滤使用 */
+    val expenseBills: List<BillEntity> = emptyList(),
+    /** 商家消费排行(已按金额降序,最多 10 名) */
+    val merchantRanking: List<MerchantSpend> = emptyList()
 ) {
     val balanceCents: Long get() = incomeCents - expenseCents
 }
@@ -89,6 +100,18 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
+        val merchantRanking = expenseBills
+            .groupBy { com.jianji.app.util.Merchants.resolve(it) }
+            .map { (name, items) ->
+                MerchantSpend(
+                    name = name,
+                    cents = items.sumOf { it.amountCents },
+                    count = items.size
+                )
+            }
+            .sortedByDescending { it.cents }
+            .take(10)
+
         return MonthStats(
             month = month,
             incomeCents = incomeBills.sumOf { it.amountCents },
@@ -96,7 +119,9 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
             expenseSlices = expenseSlices,
             incomeSlices = incomeSlices,
             trend = trend,
-            dailyExpenses = DailyStats.dailyExpenses(monthBills, month)
+            dailyExpenses = DailyStats.dailyExpenses(monthBills, month),
+            expenseBills = expenseBills,
+            merchantRanking = merchantRanking
         )
     }
 

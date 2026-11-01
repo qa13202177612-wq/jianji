@@ -4,6 +4,7 @@ import com.jianji.app.data.model.BillType
 import com.jianji.app.data.model.CategoryIds
 import com.jianji.app.util.MoneyUtils
 import java.security.MessageDigest
+import java.time.LocalDate
 import kotlin.math.abs
 
 /** 识别到的支付 App，用于区分微信/支付宝的页面文案差异。 */
@@ -46,7 +47,9 @@ data class ScreenPayment(
     val app: PaymentApp = PaymentApp.UNKNOWN,
     val status: PaymentStatus = PaymentStatus.SUCCESS,
     /** 拼多多等平台的「先用后付」订单：现在下单，确认收货后再实际扣款。 */
-    val deferred: Boolean = false
+    val deferred: Boolean = false,
+    /** 交易单号/商户单号等凭证号。有它时同一笔交易的重开页面可以稳定去重。 */
+    val txnNo: String? = null
 )
 
 /**
@@ -234,6 +237,73 @@ object ScreenPaymentParser {
         "先用后付", "先享后付", "确认收货后付款"
     )
 
+    // ------------------------------------------------------- 凭证号 / 交易时间
+
+    /** 单号类标签：拿到单号后，同一笔交易的重开页面能生成同一个去重 key。 */
+    private val TXN_LABELS = listOf(
+        "交易单号", "商户单号", "商家订单号", "订单编号", "订单号", "交易号",
+        "流水号", "账单编号", "支付单号", "退款单号", "订单id", "交易id",
+        "transactionid", "tradeno", "orderno", "orderid", "serialnumber",
+        "paymentno", "referenceno"
+    )
+
+    private val TXN_VALUE = Regex("""[A-Za-z0-9][A-Za-z0-9_\-]{7,31}""")
+
+    /** 明确带日期的交易时间标签：用于识别「历史订单详情页」。 */
+    private val TRANSACTION_TIME_LABELS = listOf(
+        "支付时间", "付款时间", "交易时间", "创建时间", "下单时间", "扣款时间",
+        "paymenttime", "transactiontime", "timepaid"
+    )
+
+    private val ISO_DATE = Regex("""(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})""")
+
+    /**
+     * 提取交易单号/订单号（LLM 兜底共用）。
+     * 值形如微信 42000xxxxxx、支付宝 2026xxxxxx、商户单号字母数字混合，
+     * 至少 5 位数字才算真单号；纯日期（如 2026-10-21）不能当单号。
+     */
+    fun extractTxnNo(lines: List<String>): String? {
+        for (index in lines.indices) {
+            val lower = lines[index].lowercase()
+            val label = TXN_LABELS.firstOrNull { lower.contains(it) } ?: continue
+            val sameLine = lower.substringAfter(label)
+            val nextLine = lines.getOrNull(index + 1).orEmpty().lowercase()
+            for (segment in listOf(sameLine, nextLine)) {
+                val match = TXN_VALUE.find(segment) ?: continue
+                val value = match.value
+                if (ISO_DATE.matchEntire(value) != null) continue
+                if (value.count { it.isDigit() } < 5) continue
+                return value.uppercase()
+            }
+        }
+        return null
+    }
+
+    /**
+     * 页面「支付时间/交易时间/创建时间」早于今天 => 这是历史订单详情，
+     * 不是刚发生的一笔交易：用户点开旧订单查看时绝不能重复记账。
+     * （LLM 兜底共用；跨天的正常补录仍可由短信账单/手动记账完成。）
+     */
+    fun hasPastTransactionDate(lines: List<String>, today: LocalDate = LocalDate.now()): Boolean {
+        for (index in lines.indices) {
+            val lower = lines[index].lowercase()
+            if (TRANSACTION_TIME_LABELS.none { lower.contains(it) }) continue
+            val segments = listOf(lines[index], lines.getOrNull(index + 1).orEmpty())
+            for (segment in segments) {
+                val match = ISO_DATE.find(segment) ?: continue
+                val date = runCatching {
+                    LocalDate.of(
+                        match.groupValues[1].toInt(),
+                        match.groupValues[2].toInt(),
+                        match.groupValues[3].toInt()
+                    )
+                }.getOrNull() ?: continue
+                if (date.isBefore(today)) return true
+            }
+        }
+        return false
+    }
+
     // ---------------------------------------------------------------- 金额
 
     private val CURRENCY_HINTS = listOf("¥", "￥", "RMB", "CNY")
@@ -270,6 +340,9 @@ object ScreenPaymentParser {
     )
     /** 10 位以上连续数字不可能是金额（本项目金额上限 99,999,999.99）。 */
     private val LONG_DIGITS = Regex("""\d{10,}""")
+    /** 整行只有一个金额（支付成功页的大号字体金额就是这种独立一行）。 */
+    private val STANDALONE_AMOUNT =
+        Regex("""[¥￥]?\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?[¥￥]?""")
 
     private data class AmountSelection(
         val cents: Long,
@@ -379,7 +452,26 @@ object ScreenPaymentParser {
                 )
             }
 
-            val amount = extractAmount(lines)
+            // 防线1：历史订单详情（支付/交易时间早于今天）不是新交易，绝不入账。
+            if (hasPastTransactionDate(lines)) {
+                return ScreenAnalysis(
+                    app, hit.status, null, "past-transaction-date", hasReceipt
+                )
+            }
+
+            val txnNo = extractTxnNo(lines)
+
+            // 防线2：账单/订单列表页——只有弱状态词（已支付）、页面上有多个
+            // 互不相同的金额、又拿不到单号时，无法确定要记哪一笔，直接放弃，
+            // 避免把旧订单再记一遍或张冠李戴。
+            val phrase = hit.phrase.substringAfter(':')
+            if (!hasReceipt && txnNo == null && phrase in WEAK_PHRASES &&
+                collectAmountCandidates(lines).map { it.cents }.distinct().size >= 2
+            ) {
+                return ScreenAnalysis(app, hit.status, null, "multi-amount-list", false)
+            }
+
+            val amount = extractAmount(lines, hit.lineIndex)
                 ?: return ScreenAnalysis(
                     app, hit.status, null, "no-amount", hasReceipt
                 )
@@ -411,7 +503,8 @@ object ScreenPaymentParser {
                 rawText = joined.take(300),
                 app = app,
                 status = hit.status,
-                deferred = deferred
+                deferred = deferred,
+                txnNo = txnNo
             )
             ScreenAnalysis(app, hit.status, payment, "ok phrase=${hit.phrase}", hasReceipt)
         } catch (t: Throwable) {
@@ -563,7 +656,7 @@ object ScreenPaymentParser {
 
     // ------------------------------------------------------------ 金额识别
 
-    private fun extractAmount(lines: List<String>): AmountSelection? {
+    private fun collectAmountCandidates(lines: List<String>): List<AmountCandidate> {
         val candidates = ArrayList<AmountCandidate>()
 
         lines.forEachIndexed { index, raw ->
@@ -581,16 +674,37 @@ object ScreenPaymentParser {
                 }
             }
         }
+        return candidates
+    }
+
+    private fun extractAmount(lines: List<String>, statusLineIndex: Int): AmountSelection? {
+        val candidates = collectAmountCandidates(lines)
 
         if (candidates.isNotEmpty()) {
             val best = candidates.sortedWith(
-                compareByDescending<AmountCandidate> { it.score }
+                compareByDescending<AmountCandidate> {
+                    it.score + proximityBonus(it.lineIndex, statusLineIndex)
+                }
+                    .thenBy { abs(it.lineIndex - statusLineIndex) }
                     .thenBy { it.lineIndex }
             ).first()
             return AmountSelection(best.cents, best.lineIndex)
         }
 
         return extractFallbackAmount(lines)
+    }
+
+    /**
+     * 「支付成功」和金额理应在同一张卡片上：离状态行越近，越可能是本次交易的
+     * 实付金额。列表页/营销位里的其它金额离状态行远，会被拉开差距。
+     */
+    private fun proximityBonus(lineIndex: Int, statusLineIndex: Int): Int {
+        return when (abs(lineIndex - statusLineIndex)) {
+            in 0..1 -> 25
+            in 2..3 -> 12
+            in 4..6 -> 4
+            else -> 0
+        }
     }
 
     /** 兜底：整页只有一个带两位小数的金额时，才认为它是支付金额。 */
@@ -628,6 +742,8 @@ object ScreenPaymentParser {
         // 只有已经命中金额关键词/货币符号的短行才加分，
         // 避免把「85%」电量、时间等短数字行当成金额。
         if (score > 0 && lower.length <= 20) score += 5
+        // 整行就是一个数字/金额：支付成功页的大号金额正是这种独立行。
+        if (score > 0 && STANDALONE_AMOUNT.matches(line.trim())) score += 8
         return score
     }
 
@@ -805,13 +921,17 @@ object ScreenPaymentParser {
         words.any { text.contains(it) }
 
     /**
-     * 同一页面在 3 分钟内重复出现时使用同一个 key，避免无障碍事件刷屏重复记账。
+     * 去重 key 两级策略：
+     * 1. 页面带交易单号 → key 只由「包名 + 单号」决定，跨时间、跨重启都稳定，
+     *    同一笔交易重复打开由数据库 smsHash 唯一索引直接 IGNORE；
+     * 2. 没有单号（支付成功页常见）→ 回退到「包名 + 金额 + 3 分钟时间桶」，
+     *    防无障碍事件刷屏；更长时间窗的重复由服务层入库前的金额查重兜底。
      * 刻意不把商户名放进 key：支付成功页是分步加载的，第一次事件可能还没有商户名，
      * 若把商户名计入会导致「无商户」和「有商户」各记一笔。
      */
     fun dedupeKey(packageName: String, payment: ScreenPayment, now: Long): String {
-        val bucket = now / (3 * 60 * 1000)
-        val raw = "$packageName|${payment.amountCents}|$bucket"
+        val raw = payment.txnNo?.let { "screenTxn|$packageName|$it" }
+            ?: "$packageName|${payment.amountCents}|${now / (3 * 60 * 1000)}"
         val digest = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8))
         val sb = StringBuilder("screen:")
         for (b in digest) {

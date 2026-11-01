@@ -23,7 +23,15 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -203,11 +211,14 @@ fun TrendChart(
  * 每日支出柱状图：X 轴为当月 1 日到月末，Y 轴为当天支出。
  * 没有支出的日期不画柱子，最高的一天用实色突出。
  * 柱顶显示金额（单位：元），数值大的柱子优先显示；放不下时自动隐藏，避免重叠。
+ * **点击任意一天**（包括没有支出的日子）会浮出气泡显示该日精确金额，再点一次取消；
+ * 同时通过 [onDayClick] 通知调用方（用于弹出「当日明细」）。
  */
 @Composable
 fun DailySpendChart(
     points: List<DailySpendPoint>,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onDayClick: ((Int) -> Unit)? = null
 ) {
     if (points.isEmpty()) return
 
@@ -221,12 +232,36 @@ fun DailySpendChart(
         color = labelColor
     )
     val peakValueStyle = valueStyle.copy(color = ChartExpense)
+    val bubbleBg = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.92f)
+    val bubbleStyle = MaterialTheme.typography.labelMedium.copy(
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Medium,
+        color = MaterialTheme.colorScheme.inverseOnSurface
+    )
+    /** 被点选中的「日」；-1 表示无选中 */
+    var selectedDay by rememberSaveable { mutableStateOf(-1) }
+    // 换月或数据刷新后清掉选中，避免高亮留在不存在/已变化的日子上
+    LaunchedEffect(points) { selectedDay = -1 }
 
     Column(modifier = modifier.fillMaxWidth()) {
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(190.dp)
+                .pointerInput(points, onDayClick) {
+                    detectTapGestures { tap ->
+                        val hitLeft = 6.dp.toPx()
+                        val hitRight = size.width - 6.dp.toPx()
+                        if (tap.x < hitLeft || tap.x > hitRight) return@detectTapGestures
+                        if (tap.y < 0f || tap.y > size.height) return@detectTapGestures
+                        val hitSlot = (hitRight - hitLeft) / points.size
+                        val index = (((tap.x - hitLeft) / hitSlot).toInt())
+                            .coerceIn(0, points.lastIndex)
+                        val day = points[index].day
+                        selectedDay = day
+                        onDayClick?.invoke(day)
+                    }
+                }
         ) {
             val maxValue = points.maxOf { it.expenseCents }
                 .coerceAtLeast(1L)
@@ -259,13 +294,24 @@ fun DailySpendChart(
                 ((bottom - top) * (point.expenseCents / maxValue))
                     .coerceAtLeast(2.dp.toPx())
 
+            // 选中日:整列淡色高亮(零点支出的日子也能看到反馈)
+            val selectedIndex = points.indexOfFirst { it.day == selectedDay }
+            if (selectedIndex >= 0) {
+                drawRoundRect(
+                    color = ChartExpense.copy(alpha = 0.07f),
+                    topLeft = Offset(centerX(selectedIndex) - slot / 2f, top),
+                    size = Size(slot, bottom - top),
+                    cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                )
+            }
+
             val barRects = ArrayList<Rect>()
             points.forEachIndexed { index, point ->
                 if (point.expenseCents <= 0L) return@forEachIndexed
 
                 val height = barHeight(point)
                 val barTop = bottom - height
-                val color = if (index == peakIndex) {
+                val color = if (point.day == selectedDay || index == peakIndex) {
                     ChartExpense
                 } else {
                     ChartExpense.copy(alpha = 0.55f)
@@ -312,6 +358,40 @@ fun DailySpendChart(
                     placed += rect
                     drawText(layout, topLeft = Offset(x, y))
                 }
+
+            // 点击气泡:精确到分的金额,最后画所以永远不被柱子/标签遮挡
+            if (selectedIndex >= 0) {
+                val sel = points[selectedIndex]
+                val bubbleText = if (sel.expenseCents > 0L) {
+                    val yuan = String.format(Locale.CHINA, "%,.2f", sel.expenseCents / 100.0)
+                    "${sel.day}日 · ¥$yuan"
+                } else {
+                    "${sel.day}日 · 无支出"
+                }
+                val bubbleLayout = textMeasurer.measure(bubbleText, bubbleStyle)
+                val padH = 8.dp.toPx()
+                val padV = 4.dp.toPx()
+                val bubbleW = bubbleLayout.size.width + padH * 2f
+                val bubbleH = bubbleLayout.size.height + padV * 2f
+                val bubbleX = (centerX(selectedIndex) - bubbleW / 2f)
+                    .coerceIn(left, (right - bubbleW).coerceAtLeast(left))
+                val referenceTop = if (sel.expenseCents > 0L) {
+                    bottom - barHeight(sel)
+                } else {
+                    top + 20.dp.toPx()
+                }
+                val bubbleY = (referenceTop - bubbleH - 4.dp.toPx()).coerceAtLeast(0f)
+                drawRoundRect(
+                    color = bubbleBg,
+                    topLeft = Offset(bubbleX, bubbleY),
+                    size = Size(bubbleW, bubbleH),
+                    cornerRadius = CornerRadius(6.dp.toPx(), 6.dp.toPx())
+                )
+                drawText(
+                    bubbleLayout,
+                    topLeft = Offset(bubbleX + padH, bubbleY + padV)
+                )
+            }
         }
 
         val labelDays = listOf(1, 5, 10, 15, 20, 25, lastDay)

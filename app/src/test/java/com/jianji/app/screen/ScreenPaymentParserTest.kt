@@ -447,4 +447,55 @@ class ScreenPaymentParserTest {
         assertEquals(PaymentStatus.REFUND_SUCCESS, analysis.status)
         assertNull(analysis.payment)
     }
+
+    // ------------------------------------------------- 重复入账防线（点开已支付订单）
+
+    @Test
+    fun billListPageWithMultipleAmountsIsNotRecorded() {
+        // 微信「账单」列表页：多行「已支付 + 互不相同金额」全是历史记录，
+        // 没有单号、没有交易详情字段时不能猜一条入账。
+        val texts = listOf(
+            "账单",
+            "¥15.00", "美团外卖", "已支付",
+            "¥9.90", "叮咚买菜", "已支付",
+            "¥30.00", "滴滴出行", "已支付"
+        )
+        val analysis = ScreenPaymentParser.analyze(texts, "com.tencent.mm")
+        assertNull(analysis.payment)
+        assertEquals("multi-amount-list", analysis.reason)
+    }
+
+    @Test
+    fun pastDatedTransactionDetailIsNotRecorded() {
+        // 两天前的订单详情页（带支付时间与交易单号）：不是新交易。
+        val twoDaysAgo = java.time.LocalDate.now().minusDays(2).toString()
+        val texts = listOf(
+            "账单详情", "已支付", "¥68.00",
+            "支付时间", "$twoDaysAgo 19:32",
+            "交易单号", "4200009876543210987"
+        )
+        val analysis = ScreenPaymentParser.analyze(texts, "com.tencent.mm")
+        assertNull(analysis.payment)
+        assertEquals("past-transaction-date", analysis.reason)
+    }
+
+    @Test
+    fun sameDayDetailPageWithTxnNoHasStableKeyAcrossTime() {
+        // 当天重开的详情页可以入账，但 key 由单号决定：
+        // 无论隔多久再打开，dedupeKey 都一样，数据库唯一索引兜底去重。
+        val today = java.time.LocalDate.now().toString()
+        val texts = listOf(
+            "账单详情", "已支付", "¥68.00",
+            "支付时间", "$today 19:32",
+            "交易单号", "42000011112222333"
+        )
+        val payment = ScreenPaymentParser.parse(texts, "com.tencent.mm")
+        assertNotNull(payment)
+        assertEquals(6800L, payment!!.amountCents)
+        assertEquals("42000011112222333", payment.txnNo)
+        val now = 1_729_382_400_000L
+        val first = ScreenPaymentParser.dedupeKey("com.tencent.mm", payment, now)
+        val daysLater = ScreenPaymentParser.dedupeKey("com.tencent.mm", payment, now + 7 * 24 * 3600_000L)
+        assertEquals(first, daysLater)
+    }
 }
