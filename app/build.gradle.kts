@@ -13,8 +13,8 @@ android {
         applicationId = "com.jianji.app"
         minSdk = 29          // 安卓 10
         targetSdk = 34       // 安卓 14
-        versionCode = 4
-        versionName = "1.2.0"
+        versionCode = 5
+        versionName = "1.2.1"
 
         vectorDrawables {
             useSupportLibrary = true
