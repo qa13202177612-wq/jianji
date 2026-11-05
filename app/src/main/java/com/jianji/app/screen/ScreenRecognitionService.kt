@@ -691,7 +691,9 @@ class ScreenRecognitionService : AccessibilityService() {
             "com.taobao.taobao",           // 淘宝
             "com.jingdong.app.mall",       // 京东
             "com.sankuai.meituan",         // 美团
-            "me.ele"                       // 饿了么
+            "me.ele",                      // 饿了么
+            "com.ss.android.ugc.aweme",    // 抖音(商城购物/团购券,2026-11-05)
+            "com.taobao.idlefish"          // 闲鱼
         )
 
         /** 正常 OCR 间隔；识别失败后拉长间隔，避免在聊天页反复截图。 */

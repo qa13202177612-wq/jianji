@@ -101,6 +101,20 @@ object ScreenPaymentParser {
         "me.ele" to "饿了么"
     )
 
+    /**
+     * 包名级默认分类(2026-11-05):电商 App 的支付页常只写商品名("医用棉签"),
+     * 没有任何品类词可查 —— 词表判完仍是「其他」时,按包名兜底一次。
+     * 只在「词表判为其他 且 是支出」时生效,不抢任何词的判定结果。
+     */
+    private val PACKAGE_DEFAULT_CATEGORY: Map<String, String> = mapOf(
+        "com.xunmeng.pinduoduo" to CategoryIds.SHOPPING,
+        "com.taobao.taobao" to CategoryIds.SHOPPING,
+        "com.taobao.idlefish" to CategoryIds.SHOPPING,       // 闲鱼
+        "com.jingdong.app.mall" to CategoryIds.SHOPPING,
+        "com.ss.android.ugc.aweme" to CategoryIds.SHOPPING   // 抖音商城购物默认算购物
+        // 抖省省(美食团购券 App)拿到真实包名后在这里加:"包名" to CategoryIds.FOOD
+    )
+
     /** 先用后付/先享后付页面的特征文案。 */
     private val DEFERRED_HINTS = listOf(
         "先用后付", "先享后付", "0元下单", "确认收货后付款",
@@ -493,7 +507,11 @@ object ScreenPaymentParser {
             } else {
                 extractedMerchant
             }
-            val categoryId = guessCategory(joined, type)
+            val categoryId = guessCategory(joined, type).let { cat ->
+                if (cat == CategoryIds.OTHER_EXPENSE && type == BillType.EXPENSE &&
+                    packageName != null && PACKAGE_DEFAULT_CATEGORY.containsKey(packageName)
+                ) PACKAGE_DEFAULT_CATEGORY.getValue(packageName) else cat
+            }
 
             val payment = ScreenPayment(
                 amountCents = amount.cents,
@@ -894,6 +912,33 @@ object ScreenPaymentParser {
         return if (income && !expense) BillType.INCOME else BillType.EXPENSE
     }
 
+    /**
+     * 餐饮通用词 + 常见品牌(2026-11-05 扩充:大量"吃的"被识别成其他)。
+     * 维护规则:只加**不会误伤**的词——人名品牌必须带后缀(“张亮麻辣烫”而非“张亮”),
+     * 便利店/零食类留给购物,不抢“仓”“超市”等地盘。
+     */
+    private val FOOD_WORDS = listOf(
+        // —— 通用词 ——
+        "餐", "饭", "吃", "宴", "酒楼", "火锅", "串串", "麻辣烫", "冒菜", "烧烤", "烤串", "炸鸡", "汉堡",
+        "披萨", "比萨", "面馆", "拉面", "烩面", "小面", "米线", "米粉", "螺蛳粉", "酸辣粉", "肥肠粉",
+        "拌饭", "盖饭", "盖浇饭", "炒饭", "粥", "包子", "饺子", "云饺", "寿司", "轻食", "食堂", "小吃",
+        "夜宵", "早点", "早餐", "午餐", "晚餐", "外卖", "取餐", "就餐", "用餐", "订餐", "餐饮",
+        "烤鱼", "烤鸭", "酸菜鱼", "牛杂", "猪脚饭", "沙县", "黄焖鸡", "卤味",
+        // —— 团购券(到店吃喝,抖省省/美团团购/抖音团购常见) ——
+        "团购", "代金券", "堂食", "双人餐", "团购券",
+        // —— 平台 ——(京东到家不放这:购物分支的"京东"会先截胡,放了也轮不到)
+        "美团", "饿了么", "朴朴",
+        // —— 咖啡·茶饮 ——
+        "咖啡", "奶茶", "茶饮", "果茶", "柠檬茶", "瑞幸", "luckin", "星巴克", "starbucks", "蜜雪",
+        "古茗", "沪上阿姨", "书亦", "茶百道", "益禾堂", "霸王茶姬", "奈雪", "喜茶", "coco",
+        "一点点", "甜啦啦", "柠季",
+        // —— 快餐·连锁 ——
+        "肯德基", "kfc", "麦当劳", "mcdonald", "华莱士", "塔斯汀", "必胜客", "汉堡王", "德克士",
+        "正新鸡排", "杨国福", "张亮麻辣烫", "老乡鸡", "乡村基", "大米先生", "真功夫", "永和大王",
+        "米村拌饭", "尊宝比萨", "达美乐", "海底捞", "呷哺", "太二", "费大厨", "兰湘子", "小菜园",
+        "西贝", "九毛九", "喜家德", "袁记云饺", "和府捞面", "味千", "紫燕百味鸡", "周黑鸭", "绝味鸭脖"
+    )
+
     private fun guessCategory(text: String, type: BillType): String {
         if (type == BillType.INCOME) {
             return when {
@@ -906,13 +951,15 @@ object ScreenPaymentParser {
         return when {
             containsAny(text, "医院", "药", "医疗", "挂号") -> CategoryIds.MEDICAL
             containsAny(text, "地铁", "公交", "滴滴", "打车", "加油", "停车", "高铁", "火车", "机票") -> CategoryIds.TRANSPORT
-            containsAny(text, "淘宝", "天猫", "京东", "拼多多", "商城", "购物", "超市", "便利店", "商场") -> CategoryIds.SHOPPING
+            // 购物先于餐饮:防止「淘宝买了实木餐桌」被“餐”字劫持;品牌词表里都是餐饮独占词,后查不受影响
+            containsAny(text, "淘宝", "天猫", "京东", "拼多多", "闲鱼", "唯品会", "得物",
+                    "商城", "购物", "超市", "便利店", "商场") -> CategoryIds.SHOPPING
+            containsAny(text, *FOOD_WORDS.toTypedArray()) -> CategoryIds.FOOD
             containsAny(text, "电影", "游戏", "娱乐", "KTV", "视频", "会员") -> CategoryIds.FUN
             containsAny(text, "房租", "水费", "电费", "燃气", "物业") -> CategoryIds.HOME
             containsAny(text, "书店", "图书", "课程", "培训", "学费", "教育") -> CategoryIds.STUDY
             containsAny(text, "话费", "流量", "宽带", "通信", "手机") -> CategoryIds.COMMUNICATION
             containsAny(text, "宠物", "猫粮", "狗粮", "兽医") -> CategoryIds.PET
-            containsAny(text, "餐", "饭", "宴", "酒楼", "火锅", "面馆", "外卖", "美团", "饿了么", "咖啡", "奶茶", "小吃", "烧烤") -> CategoryIds.FOOD
             else -> CategoryIds.OTHER_EXPENSE
         }
     }

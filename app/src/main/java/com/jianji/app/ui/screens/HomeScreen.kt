@@ -366,6 +366,25 @@ private fun BudgetCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            // 日均可用 = 剩余预算 ÷ 剩余天数(含今天)
+            val daysLeft = java.time.YearMonth.now().lengthOfMonth() -
+                    java.time.LocalDate.now().dayOfMonth + 1
+            Spacer(Modifier.height(6.dp))
+            if (over) {
+                Text(
+                    text = "预算已花完,剩下 $daysLeft 天省着点 ✌️",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
+            } else {
+                val daily = Math.round((budgetCents - spentCents).toDouble() / daysLeft)
+                Text(
+                    text = "剩 $daysLeft 天 · 日均可用 ${MoneyUtils.format(daily)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
         }
     }
 }

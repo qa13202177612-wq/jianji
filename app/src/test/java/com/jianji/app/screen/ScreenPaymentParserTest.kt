@@ -448,6 +448,50 @@ class ScreenPaymentParserTest {
         assertNull(analysis.payment)
     }
 
+    // ------------------------------------------------- 餐饮品牌识别(2026-11-05 扩词表回归)
+
+    @Test
+    fun foodBrandsClassifiedAsFood() {
+        val cases = listOf(
+            listOf("支付成功", "¥12.00", "商户全称", "蜜雪冰城股份有限公司"),
+            listOf("2:35", "支付成功", "实付 ¥19.90", "瑞幸咖啡"),
+            listOf("付款成功", "¥45.00", "老乡鸡", "订单编号 882736190283"),
+            listOf("支付成功", "¥26.00", "肯德基", "手机点餐")
+        )
+        for (texts in cases) {
+            val payment = ScreenPaymentParser.parse(texts, "com.eg.android.AlipayGphone")
+            assertNotNull("应识别出账单: $texts", payment)
+            assertEquals("应归餐饮: $texts", CategoryIds.FOOD, payment!!.categoryId)
+        }
+    }
+
+    @Test
+    fun ecommercePackageFallsBackToShopping() {
+        // 拼多多付款页只有商品名,没有任何品类词 —— 包名兜底成购物
+        val texts = listOf("支付成功", "¥9.90", "夏季连衣裙 法式收腰款")
+        val payment = ScreenPaymentParser.parse(texts, "com.xunmeng.pinduoduo")
+        assertNotNull(payment)
+        assertEquals(CategoryIds.SHOPPING, payment!!.categoryId)
+    }
+
+    @Test
+    fun groupBuyCouponStillWinsOverPackage() {
+        // 词表优先:抖音包名默认购物,但「团购」一词必须赢过兜底 → 美食
+        val texts = listOf("付款成功", "¥59.00", "【双人餐】烤肉 团购代金券")
+        val payment = ScreenPaymentParser.parse(texts, "com.ss.android.ugc.aweme")
+        assertNotNull(payment)
+        assertEquals(CategoryIds.FOOD, payment!!.categoryId)
+    }
+
+    @Test
+    fun shoppingTableIsNotFood() {
+        // 「实木餐桌」的“餐”不许劫持成餐饮:购物分支必须排在餐饮前
+        val texts = listOf("交易成功", "¥899.00", "淘宝", "实木餐桌 1.4m 北欧")
+        val payment = ScreenPaymentParser.parse(texts, "com.taobao.taobao")
+        assertNotNull(payment)
+        assertEquals(CategoryIds.SHOPPING, payment!!.categoryId)
+    }
+
     // ------------------------------------------------- 重复入账防线（点开已支付订单）
 
     @Test
