@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.jianji.app.BuildConfig
 import com.jianji.app.data.AppSettings
 import com.jianji.app.ui.components.ScreenHeader
 import com.jianji.app.ui.components.ScreenRecognitionCard
@@ -279,10 +280,11 @@ fun ProfileScreen(
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "版本 1.0.0\n" +
-                        "技术栈：Kotlin · Jetpack Compose · Material 3 · Room · DataStore\n" +
-                        "最低支持 Android 10，适配 Android 14\n\n" +
-                        "短信内容只用于本机解析，不会上传到任何服务器。",
+                    text = "简记 · 本地优先的智能记账\n" +
+                        "版本 ${BuildConfig.VERSION_NAME} ｜ 开源地址 github.com/qa13202177612-wq/jianji\n\n" +
+                        "【核心能力】短信与支付页自动记账、月度预算管控、多维图表与商家消费排行,支持 CSV 数据自主导出。\n\n" +
+                        "【隐私承诺】账单仅存储于本机设备;短信与页面文字全程本地解析,不上传任何服务器。仅调试版本在用户自行配置 AI 密钥后启用识别兜底,且只传输经脱敏处理(手机号/邮箱/卡号已遮蔽)的页面文字,屏幕截图绝不离开设备。\n\n" +
+                        "【运行环境】最低支持 Android 10,适配 Android 14。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
