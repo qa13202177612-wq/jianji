@@ -17,3 +17,5 @@ keystore.properties
 maas.properties
 ~$*
 !debug.keystore
+
+*.idsig
